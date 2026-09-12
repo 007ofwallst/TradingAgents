@@ -27,6 +27,59 @@
 
 ---
 
+> **About this distribution.** This is a modified version of [TradingAgents](https://github.com/TauricResearch/TradingAgents) by TauricResearch, maintained by **diywallst**. The original framework and research are the work of the TradingAgents authors (see [Citation](#citation)); diywallst's additions are described in [diywallst additions](#diywallst-additions). Both are licensed under Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+## diywallst additions
+
+Three tools that turn the agents' ratings into something you can track and act on. None of them make extra LLM calls.
+
+### Performance scorecard
+
+Every run records its decision in the memory log, and the next run on the same ticker settles it with the realized return and alpha versus the benchmark. The scorecard summarizes that track record: hit rate (directional calls that beat the benchmark), average raw return, average alpha, and average *signed* alpha (alpha earned by following the call), overall and by rating and ticker.
+
+```bash
+tradingagents scorecard                      # uses the configured memory log
+tradingagents scorecard --log path/to/trading_memory.md
+```
+
+```python
+from tradingagents.scorecard import load_scorecard, render_markdown
+print(render_markdown(load_scorecard("~/.tradingagents/memory/trading_memory.md")))
+```
+
+### Position sizing
+
+Turns a rating into a share count using fixed-fractional risk with an ATR stop. Buy/Sell risk the full budget, Overweight/Underweight half, Hold nothing; the position is capped at a maximum portfolio weight. Bearish ratings mean "exit" unless shorting is enabled.
+
+```bash
+tradingagents size NVDA --rating Buy --portfolio 100000 --risk 0.01 --max-position 0.10
+```
+
+```python
+from tradingagents.dataflows.stockstats_utils import load_ohlcv
+from tradingagents.sizing import suggest_position
+suggestion = suggest_position("Overweight", load_ohlcv("NVDA", "2026-09-11"), 100_000)
+```
+
+This is a mechanical risk calculation, not investment advice.
+
+### Watchlist batch runner
+
+Runs the full pipeline over a list of tickers without the interactive prompts, using the `TRADINGAGENTS_*` environment configuration. A failing ticker is recorded and the batch continues. Results are written as CSV and markdown, ranked from most bullish to most bearish.
+
+```bash
+tradingagents batch NVDA AAPL MSFT BTC-USD --date 2026-09-11 --save-reports
+```
+
+```python
+from tradingagents.graph.trading_graph import TradingAgentsGraph
+from tradingagents.watchlist import run_watchlist, write_summary
+results = run_watchlist(TradingAgentsGraph(), ["NVDA", "AAPL"], "2026-09-11")
+write_summary(results, "2026-09-11", "results/watchlists")
+```
+
+---
+
 # TradingAgents: Multi-Agents LLM Financial Trading Framework
 
 ## News

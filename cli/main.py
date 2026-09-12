@@ -1,3 +1,6 @@
+# Original work by TauricResearch, licensed under Apache-2.0.
+# Modified by diywallst, 2026: added the scorecard, size, and batch commands.
+
 import datetime
 import os
 import sys
@@ -5,6 +8,7 @@ import time
 from collections import deque
 from functools import wraps
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich import box
@@ -1332,6 +1336,168 @@ def analyze(
             err=True,
         )
         raise typer.Exit(code=1) from None
+
+
+@app.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    checkpoint: bool | None = typer.Option(
+        None,
+        "--checkpoint/--no-checkpoint",
+        help="Enable/disable checkpoint-resume for the interactive analysis.",
+    ),
+    clear_checkpoints: bool = typer.Option(
+        False,
+        "--clear-checkpoints",
+        help="Delete all saved checkpoints before running (force fresh start).",
+    ),
+):
+    """Run with no command to start an interactive analysis."""
+    # With several commands the app is a group; keep bare `tradingagents` (and its
+    # checkpoint flags) launching the analysis as it did when analyze was the only one.
+    if ctx.invoked_subcommand is None:
+        analyze(checkpoint=checkpoint, clear_checkpoints=clear_checkpoints)
+
+
+def _date_option(value: str | None) -> str:
+    """Validate a YYYY-MM-DD option, defaulting to today."""
+    if value is None:
+        return datetime.date.today().strftime("%Y-%m-%d")
+    try:
+        datetime.datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise typer.BadParameter("expected YYYY-MM-DD", param_hint="--date") from None
+    return value
+
+
+@app.command()
+def scorecard(
+    log_path: Annotated[
+        Path | None,
+        typer.Option("--log", help="Memory log to score. Defaults to the configured memory_log_path."),
+    ] = None,
+):
+    """Score resolved past decisions: hit rate and alpha by rating and ticker."""
+    from tradingagents.scorecard import load_scorecard, render_markdown
+
+    path = log_path or Path(DEFAULT_CONFIG["memory_log_path"])
+    console.print(Markdown(render_markdown(load_scorecard(path))))
+
+
+@app.command()
+def size(
+    ticker: str = typer.Argument(..., help="Ticker to size."),
+    rating: str = typer.Option(..., "--rating", help="Buy, Overweight, Hold, Underweight, or Sell."),
+    portfolio: float = typer.Option(..., "--portfolio", help="Portfolio value."),
+    date: str | None = typer.Option(None, "--date", help="Price date (YYYY-MM-DD). Defaults to today."),
+    risk: float = typer.Option(0.01, "--risk", help="Fraction of portfolio lost if the stop is hit."),
+    max_position: float = typer.Option(
+        0.10, "--max-position", help="Largest position as a fraction of portfolio."
+    ),
+    atr_multiple: float = typer.Option(2.0, "--atr-multiple", help="Stop distance in ATRs."),
+    allow_short: bool = typer.Option(
+        False, "--allow-short", help="Size bearish ratings as shorts instead of exits."
+    ),
+):
+    """Suggest a position size for a rating using an ATR stop."""
+    from tradingagents.dataflows.stockstats_utils import load_ohlcv
+    from tradingagents.sizing import suggest_position
+
+    date = _date_option(date)
+    ticker = ticker.strip().upper()
+    try:
+        suggestion = suggest_position(
+            rating,
+            load_ohlcv(ticker, date),
+            portfolio,
+            risk_per_trade=risk,
+            max_position=max_position,
+            atr_multiple=atr_multiple,
+            allow_short=allow_short,
+        )
+    except Exception as e:
+        console.print(f"[red]Could not size {ticker}: {e}[/red]")
+        raise typer.Exit(code=1) from None
+
+    table = Table(title=f"{ticker} · {suggestion.rating} · {date}", box=box.SIMPLE_HEAD)
+    table.add_column("Field")
+    table.add_column("Value", justify="right")
+    table.add_row("Action", suggestion.action)
+    table.add_row("Shares", f"{suggestion.shares:,}")
+    table.add_row("Weight", f"{suggestion.weight:+.2%}")
+    if suggestion.entry_price is not None:
+        table.add_row("Entry", f"{suggestion.entry_price:,.2f}")
+        table.add_row("Stop", f"{suggestion.stop_price:,.2f}")
+        table.add_row("ATR", f"{suggestion.atr:,.2f}")
+        table.add_row("Risk at stop", f"{suggestion.risk_amount:,.2f}")
+    console.print(table)
+    if suggestion.note:
+        console.print(suggestion.note)
+    console.print("[dim]Mechanical risk calculation, not investment advice.[/dim]")
+
+
+class _GraphPerAssetType:
+    """Lazily build one graph per asset type, matching the interactive CLI's analyst
+    selection: crypto runs skip the fundamentals analyst."""
+
+    _ANALYSTS = ("market", "social", "news", "fundamentals")
+
+    def __init__(self, config: dict):
+        self._config = config
+        self._graphs: dict[str, TradingAgentsGraph] = {}
+        self._last: TradingAgentsGraph | None = None
+
+    def propagate(self, ticker, trade_date, asset_type="stock"):
+        if asset_type not in self._graphs:
+            analysts = [a for a in self._ANALYSTS if asset_type != "crypto" or a != "fundamentals"]
+            self._graphs[asset_type] = TradingAgentsGraph(
+                selected_analysts=analysts, debug=False, config=self._config
+            )
+        self._last = self._graphs[asset_type]
+        return self._last.propagate(ticker, trade_date, asset_type=asset_type)
+
+    def save_reports(self, final_state, ticker):
+        return self._last.save_reports(final_state, ticker)
+
+
+@app.command()
+def batch(
+    tickers: Annotated[
+        list[str], typer.Argument(help="Tickers to analyze (space or comma separated).")
+    ],
+    date: str | None = typer.Option(None, "--date", help="Analysis date (YYYY-MM-DD). Defaults to today."),
+    save_reports: bool = typer.Option(
+        False, "--save-reports", help="Also write each ticker's full report tree."
+    ),
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out", help="Summary directory. Defaults to <results_dir>/watchlists."),
+    ] = None,
+):
+    """Analyze a watchlist non-interactively using the TRADINGAGENTS_* env config."""
+    from tradingagents.watchlist import run_watchlist, write_summary
+
+    date = _date_option(date)
+
+    def report(result):
+        if result.ok:
+            console.print(f"[green]✓[/green] {result.ticker}: {result.signal}")
+        else:
+            console.print(f"[red]✗[/red] {result.ticker}: {result.error}")
+
+    results = run_watchlist(
+        _GraphPerAssetType(DEFAULT_CONFIG.copy()),
+        tickers,
+        date,
+        asset_type=lambda t: detect_asset_type(t).value,
+        save_reports=save_reports,
+        on_result=report,
+    )
+    target = out_dir or Path(DEFAULT_CONFIG["results_dir"]) / "watchlists"
+    csv_path, md_path = write_summary(results, date, target)
+    console.print(f"\nSummary written to {md_path} and {csv_path}")
+    if not any(r.ok for r in results):
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

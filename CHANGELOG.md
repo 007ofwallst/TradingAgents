@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Breaking changes within the 0.x line are called out explicitly.
 
+## [Unreleased] — diywallst additions
+
+Additions by diywallst on top of the TauricResearch v0.4.0 release.
+
+### Added
+
+- **Performance scorecard** (`tradingagents/scorecard.py`, `tradingagents scorecard`).
+  Hit rate, average raw return, alpha, and signed alpha over resolved memory-log
+  decisions, overall and by rating and ticker.
+- **Position sizing** (`tradingagents/sizing.py`, `tradingagents size`). Converts a
+  5-tier rating into a share count using conviction-scaled fixed-fractional risk,
+  an ATR stop, and a maximum position weight; long-only by default.
+- **Watchlist batch runner** (`tradingagents/watchlist.py`, `tradingagents batch`).
+  Non-interactive runs over many tickers with per-ticker failure isolation and a
+  ranked CSV/markdown summary. Crypto tickers run without the fundamentals analyst.
+
 ## [0.4.0] — 2026-08-31
 
 Look-ahead and point-in-time fixes across the data and memory layers, clearer

@@ -1,0 +1,17 @@
+TradingAgents
+Copyright TauricResearch and the TradingAgents contributors
+(Yijia Xiao, Edward Sun, Di Luo, Wei Wang, et al.)
+https://github.com/TauricResearch/TradingAgents
+
+This distribution is a modified version of TradingAgents v0.4.0,
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Modifications and additions Copyright 2026 diywallst, also licensed under
+the Apache License, Version 2.0:
+  - tradingagents/scorecard.py   (decision-log performance scorecard)
+  - tradingagents/sizing.py      (ATR-based position sizing)
+  - tradingagents/watchlist.py   (watchlist batch runner)
+  - cli/main.py                  (added scorecard, size, and batch commands)
+  - tests/test_scorecard.py, tests/test_sizing.py, tests/test_watchlist.py,
+    tests/test_cli_additions.py
+  - README.md, CHANGELOG.md, pyproject.toml (documentation and metadata)

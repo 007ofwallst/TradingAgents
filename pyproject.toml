@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "tradingagents"
 version = "0.4.0"
 description = "TradingAgents: Multi-Agents LLM Financial Trading Framework"
+# Original framework by TauricResearch; this modified distribution is maintained by diywallst.
+authors = [{ name = "TauricResearch" }]
+maintainers = [{ name = "diywallst" }]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
